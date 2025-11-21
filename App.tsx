@@ -1,18 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ImageUploader } from './components/ImageUploader';
 import { ResultViewer } from './components/ResultViewer';
 import { generateFigurineImage } from './services/geminiService';
 import { AppState } from './types';
-import { Wand2, Sparkles, Info, Gift, AlertTriangle } from 'lucide-react';
+import { Wand2, Sparkles, AlertTriangle, Clock, RefreshCw, Timer } from 'lucide-react';
 
 const FIGURINE_PROMPT = `Create a 1/7 scale commercialized figurine of the characters in the picture, in a realistic style, in a real environment. The figurine is placed on a computer desk. The figurine has a round transparent acrylic base, with no text on the base. The content on the computer screen is a 3D modeling process of this figurine. Next to the computer screen is a toy packaging box, designed in a style reminiscent of high-quality collectible figures, printed with original artwork. The packaging features two-dimensional flat illustrations.`;
 
 const MAX_USAGE_LIMIT = 3;
 const STORAGE_KEY = 'figur_atolyesi_usage_count';
+const COOLDOWN_STORAGE_KEY = 'figur_atolyesi_cooldown_end';
+const RESET_TIME_KEY = 'figur_atolyesi_reset_time';
+const COOLDOWN_DURATION_MS = 30000; // 30 seconds
+const RESET_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [resultText, setResultText] = useState<string | null>(null);
   
@@ -24,8 +29,115 @@ const App: React.FC = () => {
     return 0;
   });
 
+  // Cooldown State (30 sec between generations)
+  const [cooldownEndTime, setCooldownEndTime] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(COOLDOWN_STORAGE_KEY);
+      return saved ? parseInt(saved, 10) : 0;
+    }
+    return 0;
+  });
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+
+  // Reset Countdown State (When limit reached)
+  const [timeToReset, setTimeToReset] = useState<number>(0);
+
+  // 6-Hour Reset Logic Check
+  useEffect(() => {
+    const checkResetTime = () => {
+      const now = Date.now();
+      const storedResetTime = localStorage.getItem(RESET_TIME_KEY);
+
+      // If no reset time exists, set one for the future
+      if (!storedResetTime) {
+         const nextReset = now + RESET_DURATION_MS;
+         localStorage.setItem(RESET_TIME_KEY, nextReset.toString());
+         return;
+      }
+
+      // If current time is past the reset time
+      if (now > parseInt(storedResetTime, 10)) {
+        // Reset usage count
+        setUsageCount(0);
+        localStorage.setItem(STORAGE_KEY, '0');
+        
+        // Set next reset time (now + 6 hours)
+        const nextReset = now + RESET_DURATION_MS;
+        localStorage.setItem(RESET_TIME_KEY, nextReset.toString());
+      }
+    };
+
+    checkResetTime();
+  }, []);
+
+  // Handle Cooldown Timer (Short term 30s)
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = Date.now();
+      const remaining = Math.ceil((cooldownEndTime - now) / 1000);
+      return remaining > 0 ? remaining : 0;
+    };
+
+    setCooldownSeconds(calculateTimeLeft());
+
+    if (cooldownEndTime > Date.now()) {
+      const interval = setInterval(() => {
+        const remaining = calculateTimeLeft();
+        setCooldownSeconds(remaining);
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [cooldownEndTime]);
+
+  // Handle Reset Countdown Timer (Long term 6h) - Only runs when limit reached
+  useEffect(() => {
+    if (usageCount >= MAX_USAGE_LIMIT) {
+      const updateResetTimer = () => {
+        const storedResetTime = localStorage.getItem(RESET_TIME_KEY);
+        if (storedResetTime) {
+          const diff = parseInt(storedResetTime, 10) - Date.now();
+          setTimeToReset(Math.max(0, diff));
+        }
+      };
+
+      updateResetTimer(); // Initial call
+      const interval = setInterval(updateResetTimer, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [usageCount]);
+
+  // Format milliseconds to HH:MM:SS
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Clean up object URL when component unmounts or image changes
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   const handleImageSelect = (file: File | null) => {
     setSelectedImage(file);
+    
+    // Generate Preview URL immediately here
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    } else {
+      setPreviewUrl(null);
+    }
+
     // Reset state if user changes image, but keep it IDLE unless we were already showing a result
     if (appState !== AppState.IDLE && file) {
        setAppState(AppState.IDLE);
@@ -36,9 +148,12 @@ const App: React.FC = () => {
 
   const handleGenerate = async () => {
     if (usageCount >= MAX_USAGE_LIMIT) {
-      setAppState(AppState.ERROR);
-      setResultText("Üzgünüz, bu uygulama kişi başı en fazla 3 kez kullanılabilir. Hakkınız dolmuştur.");
-      setResultImage(null);
+      // Normally disabled button prevents this, but just in case
+      return;
+    }
+
+    // Cooldown Check
+    if (Date.now() < cooldownEndTime) {
       return;
     }
 
@@ -56,9 +171,16 @@ const App: React.FC = () => {
 
       if (result.imageUrl) {
         setAppState(AppState.SUCCESS);
+        
+        // Increment Usage
         const newCount = usageCount + 1;
         setUsageCount(newCount);
         localStorage.setItem(STORAGE_KEY, newCount.toString());
+
+        // Set Cooldown
+        const nextCooldown = Date.now() + COOLDOWN_DURATION_MS;
+        setCooldownEndTime(nextCooldown);
+        localStorage.setItem(COOLDOWN_STORAGE_KEY, nextCooldown.toString());
       } else {
         setAppState(AppState.ERROR);
       }
@@ -70,186 +192,230 @@ const App: React.FC = () => {
   };
 
   const remainingRights = Math.max(0, MAX_USAGE_LIMIT - usageCount);
-  const isButtonDisabled = !selectedImage || appState === AppState.GENERATING;
+  const isCooldownActive = cooldownSeconds > 0;
+  const isLimitReached = usageCount >= MAX_USAGE_LIMIT;
+  const isButtonDisabled = !selectedImage || appState === AppState.GENERATING || isCooldownActive || isLimitReached;
 
-  const renderButtonContent = () => (
-    appState === AppState.GENERATING ? (
-      <>
-        <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-        <span>Oluşturuluyor...</span>
-      </>
-    ) : (
+  // Custom Cooldown UI Component (Short wait)
+  const CooldownTimerDisplay = () => {
+    const percentage = (cooldownSeconds / (COOLDOWN_DURATION_MS / 1000)) * 100;
+    
+    return (
+      <div className="w-full relative h-14 bg-slate-900 rounded-xl border border-amber-500/30 overflow-hidden flex items-center justify-center shadow-lg">
+        <div 
+          className="absolute left-0 top-0 bottom-0 bg-amber-600/20 transition-all duration-1000 ease-linear"
+          style={{ width: `${percentage}%` }}
+        />
+        <div className="relative z-10 flex items-center space-x-3 animate-pulse">
+           <Clock size={24} className="text-amber-500" />
+           <div className="flex flex-col items-start leading-none">
+              <span className="text-xs text-amber-500/80 uppercase tracking-wider font-bold">Bir sonraki işlem için</span>
+              <span className="text-xl font-bold text-amber-400 font-mono">Bekleyiniz: {cooldownSeconds}</span>
+           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Custom Reset Timer UI Component (Long wait when limit reached)
+  const ResetTimerDisplay = ({ mobile = false }: { mobile?: boolean }) => {
+    return (
+      <div className={`w-full relative bg-red-950/30 rounded-xl border border-red-500/30 flex items-center justify-center text-red-200 ${mobile ? 'h-14' : 'p-4'}`}>
+        <div className="flex items-center space-x-3">
+           <Timer size={mobile ? 20 : 24} className="text-red-400" />
+           <div className="flex flex-col items-start leading-none">
+              <span className={`uppercase tracking-wider font-bold text-red-400/70 ${mobile ? 'text-[10px]' : 'text-xs'}`}>
+                Yeni Haklar İçin Kalan Süre
+              </span>
+              <span className={`${mobile ? 'text-lg' : 'text-xl'} font-bold text-red-100 font-mono`}>
+                {formatTime(timeToReset)}
+              </span>
+           </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderButtonContent = () => {
+    if (appState === AppState.GENERATING) {
+      return (
+        <>
+          <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          <span>Oluşturuluyor...</span>
+        </>
+      );
+    }
+    
+    return (
       <>
         <Wand2 size={20} />
         <span>Hemen 3D ye Çevir</span>
       </>
-    )
-  );
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500/30">
-      {/* Special Banner */}
-      <div className="bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 text-white shadow-lg relative z-50">
-        <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-center space-x-2 text-sm md:text-base font-bold tracking-wide">
-          <Gift size={18} className="animate-bounce" />
-          <span>Ankara Çocuk Etkinlikler Takipçilerine Özel</span>
-          <Gift size={18} className="animate-bounce" />
-        </div>
-      </div>
-
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg shadow-lg shadow-indigo-900/50">
-              <Sparkles className="text-white w-6 h-6" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-              Figür Atölyesi
-            </h1>
-          </div>
-          <div className="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-400">
-             <span className="flex items-center space-x-1 hover:text-indigo-400 transition-colors cursor-help" title="Gemini 2.5 Kullanılıyor">
-                <Info size={16} />
-                <span>Gemini 2.5 ile güçlendirilmiştir</span>
-             </span>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 pb-32 lg:pb-12">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
+      <div className="max-w-6xl mx-auto p-4 md:p-8 pb-32 md:pb-8">
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-start">
+        {/* Header */}
+        <header className="text-center mb-8 md:mb-12 pt-4">
+          <div className="inline-flex items-center justify-center space-x-3 mb-4">
+             <div className="inline-flex items-center justify-center px-3 py-1 bg-indigo-500/10 rounded-full ring-1 ring-indigo-500/30">
+              <Sparkles className="w-4 h-4 text-indigo-400 mr-2" />
+              <span className="text-indigo-300 font-semibold tracking-wide uppercase text-xs">Yapay Zeka</span>
+            </div>
+             <div className="inline-flex items-center justify-center px-3 py-1 bg-emerald-500/10 rounded-full ring-1 ring-emerald-500/30">
+              <span className="text-emerald-300 font-semibold tracking-wide uppercase text-xs">ÜCRETSİZ</span>
+            </div>
+          </div>
+          
+          <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-white via-indigo-200 to-slate-400 bg-clip-text text-transparent mb-4 drop-shadow-lg">
+            Figür Atölyesi
+          </h1>
+          <p className="text-slate-400 text-lg max-w-2xl mx-auto leading-relaxed">
+            <span className="text-indigo-400 font-medium">Ankara Çocuk Etkinlikler</span> takipçilerine özel, tamamen ücretsiz. 
+            <br className="hidden md:block" />
+            Her 6 saatte bir yenilenen 3 kullanım hakkı ile fotoğraflarınızı figürlere dönüştürün.
+          </p>
+        </header>
+
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 items-start">
           
           {/* Left Column: Input */}
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-200 flex items-center space-x-2">
-                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-slate-400 text-xs border border-slate-700">1</span>
-                <span>Kaynak Resim</span>
-              </h2>
-              {selectedImage && appState === AppState.IDLE && (
-                 <span className="text-xs text-indigo-400 animate-pulse font-medium">Oluşturmaya hazır</span>
-              )}
-            </div>
-
-            <div className="bg-slate-900 rounded-2xl p-1 border border-slate-800 shadow-xl">
+          <div className="flex flex-col space-y-6">
+            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-white flex items-center">
+                  <span className="w-1 h-6 bg-indigo-500 rounded-full mr-3"></span>
+                  Fotoğraf Yükle
+                </h2>
+                {selectedImage && (
+                  <span className="text-xs px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded-md border border-emerald-500/20">
+                    Seçildi
+                  </span>
+                )}
+              </div>
+              
               <ImageUploader 
-                onImageSelected={handleImageSelect} 
-                selectedImage={selectedImage} 
+                onImageSelected={handleImageSelect}
+                selectedImage={selectedImage}
+                previewUrl={previewUrl}
                 disabled={appState === AppState.GENERATING}
               />
-            </div>
 
-            {/* Prompt Display (Read Only) */}
-            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800/50">
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Yapılandırma</h3>
-              <p className="text-sm text-slate-400 leading-relaxed italic border-l-2 border-indigo-500/30 pl-3">
-                "1/7 ölçekli ticarileştirilmiş figür oluştur... gerçekçi stil... bilgisayar masası üzerinde..."
-              </p>
-            </div>
+              {/* Action Area (Desktop) */}
+              <div className="hidden md:block mt-6">
+                {/* Usage Limit Display */}
+                <div className="mb-4 bg-slate-800/40 rounded-xl p-2 border border-slate-700/50">
+                    <div className="flex items-center gap-4">
+                        {/* Number Box */}
+                        <div className={`
+                            w-16 h-16 flex-shrink-0 rounded-lg flex flex-col items-center justify-center border shadow-inner transition-colors
+                            ${remainingRights > 1 
+                                ? 'bg-slate-800 border-emerald-500/30 text-emerald-400' 
+                                : remainingRights === 1 
+                                ? 'bg-slate-800 border-amber-500/30 text-amber-400' 
+                                : 'bg-slate-800 border-red-500/30 text-red-400'}
+                        `}>
+                            <span className="text-3xl font-bold leading-none">{remainingRights}</span>
+                            <span className="text-[9px] font-bold uppercase tracking-wider opacity-70 mt-1">Kalan</span>
+                        </div>
 
-            <div className="space-y-3">
-              {/* Desktop Button - Hidden on mobile */}
-              <button
-                onClick={handleGenerate}
-                disabled={isButtonDisabled}
-                className={`hidden lg:flex w-full py-4 px-6 rounded-xl font-bold text-lg shadow-lg transition-all duration-300 items-center justify-center space-x-2
-                  ${isButtonDisabled
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-indigo-600/20 hover:scale-[1.02] active:scale-[0.98]'
-                  }
-                `}
-              >
-                {renderButtonContent()}
-              </button>
-              
-              {/* Usage Limit Indicator */}
-              <div className="mt-2">
-                {remainingRights === 0 ? (
-                   <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-xl flex items-center justify-center text-red-400 space-x-2">
-                      <AlertTriangle size={20} />
-                      <span className="font-bold text-lg">Kullanım hakkınız doldu</span>
-                   </div>
+                        {/* Text Details */}
+                        <div className="flex-grow">
+                             <h4 className="text-sm font-semibold text-slate-200 mb-1">Kullanım Hakkınız</h4>
+                             <div className="flex space-x-1 mb-2">
+                                {[...Array(MAX_USAGE_LIMIT)].map((_, i) => (
+                                    <div key={i} className={`h-1.5 flex-1 rounded-full ${i < remainingRights ? (remainingRights > 1 ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-slate-700'}`} />
+                                ))}
+                             </div>
+                             <div className="flex items-center text-[11px] text-slate-400">
+                                <RefreshCw size={12} className="mr-1.5 text-indigo-400" />
+                                <span>Haklarınız her 6 saatte bir yenilenir</span>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {isLimitReached ? (
+                   <ResetTimerDisplay />
+                ) : isCooldownActive ? (
+                   <CooldownTimerDisplay />
                 ) : (
-                  <div className="relative overflow-hidden rounded-xl bg-slate-900 border border-slate-800 p-4 flex items-center justify-between group hover:border-indigo-500/30 transition-colors">
-                     <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                     
-                     <div className="flex flex-col">
-                        <span className="text-slate-400 text-sm font-medium">Kalan Kullanım Hakkı</span>
-                        <span className="text-xs text-slate-500">Maksimum {MAX_USAGE_LIMIT} kez</span>
-                     </div>
-
-                     <div className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-800 border-2 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)] relative z-10">
-                        <span className={`text-2xl font-black ${
-                          remainingRights === 1 ? 'text-red-500' : 
-                          remainingRights === 2 ? 'text-amber-400' : 'text-emerald-400'
-                        }`}>
-                          {remainingRights}
-                        </span>
-                     </div>
-                  </div>
+                    <button
+                        onClick={handleGenerate}
+                        disabled={isButtonDisabled}
+                        className={`
+                        w-full py-4 px-6 rounded-xl font-bold text-lg shadow-lg transition-all transform duration-200
+                        flex items-center justify-center space-x-3
+                        ${isButtonDisabled 
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                            : 'bg-indigo-600 hover:bg-indigo-500 text-white hover:scale-[1.02] hover:shadow-indigo-500/25 active:scale-95'}
+                        `}
+                    >
+                        {renderButtonContent()}
+                    </button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right Column: Output */}
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-200 flex items-center space-x-2">
-                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-slate-400 text-xs border border-slate-700">2</span>
-                <span>3D Çıktı</span>
-              </h2>
-              {appState === AppState.SUCCESS && (
-                 <span className="px-2 py-1 rounded-md bg-green-500/10 text-green-400 text-xs font-medium border border-green-500/20">
-                   Tamamlandı
-                 </span>
-              )}
-            </div>
-
-            <div className="bg-slate-900 rounded-2xl p-1 border border-slate-800 shadow-xl min-h-[400px]">
-               <ResultViewer 
-                 appState={appState} 
-                 resultImage={resultImage} 
-                 resultText={resultText}
-                 onRetry={() => setAppState(AppState.IDLE)}
-               />
-            </div>
+          {/* Right Column: Result */}
+          <div className="flex flex-col space-y-6">
+             <div className="flex items-center justify-between md:hidden mb-2">
+                <h2 className="text-xl font-semibold text-white flex items-center">
+                  <span className="w-1 h-6 bg-indigo-500 rounded-full mr-3"></span>
+                  3D Çıktı
+                </h2>
+             </div>
             
-            <div className="flex items-start space-x-3 text-xs text-slate-500 bg-slate-900/30 p-4 rounded-lg">
-               <Info size={14} className="mt-0.5 flex-shrink-0" />
-               <p>
-                 Oluşturulan görüntü, yüklediğiniz fotoğrafın yapay zeka yorumudur. "Ticarileştirilmiş figür" estetiğine uyması için akrilik taban, ambalaj kutusu ve bilgisayar ekranı arka planı gibi detaylar otomatik olarak eklenir.
-               </p>
-            </div>
+             {/* Result Component */}
+             <ResultViewer 
+               appState={appState}
+               resultImage={resultImage}
+               resultText={resultText}
+               onRetry={() => setAppState(AppState.IDLE)}
+             />
           </div>
 
         </div>
-      </main>
-
-      {/* Mobile Fixed Bottom Action Bar */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800 z-50 lg:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.5)] flex flex-col gap-2">
-        {!selectedImage && (
-            <div className="text-center text-xs text-indigo-400 font-medium animate-pulse mb-1 flex items-center justify-center space-x-1">
-              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
-              <span>Lütfen önce yukarıdan fotoğraf seçin</span>
-            </div>
-        )}
-        <button
-          onClick={handleGenerate}
-          disabled={isButtonDisabled}
-          className={`w-full py-3.5 px-6 rounded-xl font-bold text-lg shadow-lg transition-all duration-300 flex items-center justify-center space-x-2
-            ${isButtonDisabled
-              ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-75'
-              : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-900/50 active:scale-[0.98]'
-            }
-          `}
-        >
-          {renderButtonContent()}
-        </button>
       </div>
 
+      {/* Mobile Fixed Bottom Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 p-4 z-50 safe-area-pb">
+        {isLimitReached ? (
+             <ResetTimerDisplay mobile />
+        ) : isCooldownActive ? (
+             <CooldownTimerDisplay />
+        ) : (
+             <div className="flex items-center gap-3">
+                {/* Compact Usage Counter for Mobile */}
+                <div className={`flex flex-col items-center justify-center rounded-lg px-3 py-1 border min-w-[60px]
+                    ${remainingRights > 0 ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-900/50'}
+                `}>
+                    <span className={`text-xl font-bold ${remainingRights > 0 ? 'text-white' : 'text-red-400'}`}>{remainingRights}</span>
+                    <span className="text-[9px] text-slate-400 uppercase">Hak</span>
+                </div>
+
+                <button
+                    onClick={handleGenerate}
+                    disabled={isButtonDisabled}
+                    className={`
+                        flex-grow py-3 px-4 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center space-x-2
+                        ${isButtonDisabled 
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                        : 'bg-indigo-600 text-white active:scale-95'}
+                    `}
+                >
+                    {!selectedImage ? (
+                        <span className="animate-pulse">👆 Önce Fotoğraf Seçin</span>
+                    ) : renderButtonContent()}
+                </button>
+            </div>
+        )}
+      </div>
     </div>
   );
 };

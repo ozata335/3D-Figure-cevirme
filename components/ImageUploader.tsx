@@ -1,15 +1,15 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, X, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, ShieldCheck } from 'lucide-react';
 
 interface ImageUploaderProps {
   onImageSelected: (file: File | null) => void;
   selectedImage: File | null;
+  previewUrl: string | null;
   disabled?: boolean;
 }
 
-export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, selectedImage, disabled }) => {
+export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, selectedImage, previewUrl, disabled }) => {
   const [dragActive, setDragActive] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -43,19 +43,16 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, s
   };
 
   const processFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
     onImageSelected(file);
   };
 
   const clearImage = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setPreviewUrl(null);
     onImageSelected(null);
   };
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full flex flex-col">
       <div
         className={`relative flex-grow flex flex-col items-center justify-center w-full min-h-[300px] md:min-h-[400px] rounded-xl border-2 border-dashed transition-all duration-300 overflow-hidden group
           ${dragActive ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'}
@@ -110,6 +107,14 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, s
           onChange={handleChange}
           disabled={disabled}
         />
+      </div>
+
+      {/* Privacy Note */}
+      <div className="mt-3 flex items-start space-x-2 px-2">
+        <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+        <p className="text-[11px] text-slate-400 leading-tight">
+          <span className="text-slate-300 font-semibold">Güvenlik Notu:</span> Yüklediğiniz fotoğraflar sadece anlık işlem için kullanılır ve işlem bittikten sonra sistemden silinir. Asla kaydedilmez veya paylaşılmaz.
+        </p>
       </div>
     </div>
   );
