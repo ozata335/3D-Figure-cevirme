@@ -347,6 +347,40 @@ const App: React.FC = () => {
                 disabled={appState === AppState.GENERATING}
               />
 
+              {/* Mobile Action Area (Moved from bottom) */}
+              <div className="md:hidden mt-4 w-full">
+                {isLimitReached ? (
+                  <ResetTimerDisplay mobile />
+                ) : isCooldownActive ? (
+                  <CooldownTimerDisplay />
+                ) : (
+                  <div className="flex items-center gap-3">
+                    {/* Compact Usage Counter for Mobile */}
+                    <div className={`flex flex-col items-center justify-center rounded-lg px-3 py-1 border min-w-[60px]
+                            ${remainingRights > 0 ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-900/50'}
+                        `}>
+                      <span className={`text-xl font-bold ${remainingRights > 0 ? 'text-white' : 'text-red-400'}`}>{remainingRights}</span>
+                      <span className="text-[9px] text-slate-400 uppercase">Hak</span>
+                    </div>
+
+                    <button
+                      onClick={handleGenerate}
+                      disabled={isButtonDisabled}
+                      className={`
+                                flex-grow py-3 px-4 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center space-x-2
+                                ${isButtonDisabled
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-indigo-600 text-white active:scale-95'}
+                            `}
+                    >
+                      {!selectedImage ? (
+                        <span className="animate-pulse">👆 Önce Fotoğraf Seçin</span>
+                      ) : renderButtonContent()}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Action Area (Desktop) */}
               <div className="hidden md:block mt-6">
                 {/* Usage Limit Display */}
@@ -425,39 +459,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Fixed Bottom Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 p-4 z-50 safe-area-pb">
-        {isLimitReached ? (
-          <ResetTimerDisplay mobile />
-        ) : isCooldownActive ? (
-          <CooldownTimerDisplay />
-        ) : (
-          <div className="flex items-center gap-3">
-            {/* Compact Usage Counter for Mobile */}
-            <div className={`flex flex-col items-center justify-center rounded-lg px-3 py-1 border min-w-[60px]
-                    ${remainingRights > 0 ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-900/50'}
-                `}>
-              <span className={`text-xl font-bold ${remainingRights > 0 ? 'text-white' : 'text-red-400'}`}>{remainingRights}</span>
-              <span className="text-[9px] text-slate-400 uppercase">Hak</span>
-            </div>
 
-            <button
-              onClick={handleGenerate}
-              disabled={isButtonDisabled}
-              className={`
-                        flex-grow py-3 px-4 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center space-x-2
-                        ${isButtonDisabled
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-indigo-600 text-white active:scale-95'}
-                    `}
-            >
-              {!selectedImage ? (
-                <span className="animate-pulse">👆 Önce Fotoğraf Seçin</span>
-              ) : renderButtonContent()}
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
