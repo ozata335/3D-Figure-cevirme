@@ -3,9 +3,12 @@ import { ImageUploader } from './components/ImageUploader';
 import { ResultViewer } from './components/ResultViewer';
 import { generateFigurineImage } from './services/geminiService';
 import { AppState } from './types';
-import { Wand2, Sparkles, AlertTriangle, Clock, RefreshCw, Timer } from 'lucide-react';
+import { Wand2, Sparkles, Clock, RefreshCw, Timer, Info, Lightbulb, ArrowRight } from 'lucide-react';
 
 const FIGURINE_PROMPT = `Create a 1/7 scale commercialized figurine of the characters in the picture, in a realistic style, in a real environment. The figurine is placed on a computer desk. The figurine has a round transparent acrylic base, with no text on the base. The content on the computer screen is a 3D modeling process of this figurine. Next to the computer screen is a toy packaging box, designed in a style reminiscent of high-quality collectible figures, printed with original artwork. The packaging features two-dimensional flat illustrations.`;
+
+// Buraya örnek olarak göstermek istediğiniz görselin URL'sini koyabilirsiniz.
+const EXAMPLE_IMAGE_URL = "https://images.unsplash.com/photo-1608889175123-8ee362201f81?q=80&w=800&auto=format&fit=crop"; 
 
 const MAX_USAGE_LIMIT = 3;
 const STORAGE_KEY = 'figur_atolyesi_usage_count';
@@ -259,7 +262,7 @@ const App: React.FC = () => {
       <div className="max-w-6xl mx-auto p-4 md:p-8 pb-32 md:pb-8">
         
         {/* Header */}
-        <header className="text-center mb-8 md:mb-12 pt-4">
+        <header className="text-center mb-8 pt-4">
           <div className="inline-flex items-center justify-center space-x-3 mb-4">
              <div className="inline-flex items-center justify-center px-3 py-1 bg-indigo-500/10 rounded-full ring-1 ring-indigo-500/30">
               <Sparkles className="w-4 h-4 text-indigo-400 mr-2" />
@@ -279,6 +282,45 @@ const App: React.FC = () => {
             Her 6 saatte bir yenilenen 3 kullanım hakkı ile fotoğraflarınızı figürlere dönüştürün.
           </p>
         </header>
+
+        {/* Example Showcase Section */}
+        <div className="w-full max-w-4xl mx-auto mb-12 bg-gradient-to-r from-slate-900/60 to-indigo-950/30 rounded-2xl border border-slate-800/60 overflow-hidden shadow-xl">
+            <div className="flex flex-col md:flex-row items-center">
+                {/* Text Info */}
+                <div className="w-full md:w-3/5 p-6 md:p-8 flex flex-col justify-center">
+                    <h3 className="text-2xl font-bold text-white mb-3 flex items-center">
+                        <Wand2 className="w-5 h-5 text-indigo-400 mr-2" />
+                        Nasıl Görünecek?
+                    </h3>
+                    <p className="text-slate-300 text-sm leading-relaxed mb-6">
+                        Yüklediğiniz fotoğrafları; tıpkı yandaki örnekte olduğu gibi, detaylı paket tasarımı, akrilik standı ve gerçekçi dokusuyla sanki bir mağaza vitrinindeymiş gibi 3D koleksiyon figürüne dönüştürüyoruz.
+                    </p>
+                    
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start space-x-3">
+                        <Lightbulb className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="text-amber-200 font-semibold text-xs uppercase tracking-wider mb-1">En İyi Sonuç İçin İpucu</h4>
+                            <p className="text-xs text-amber-200/70 leading-relaxed">
+                                <strong>Ayakta (boydan)</strong> çekilmiş ve <strong>arka planı sade/karışık olmayan</strong> fotoğraflar yüklediğinizde yapay zeka çok daha net ve estetik modeller üretir.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Example Image */}
+                <div className="w-full md:w-2/5 relative h-64 md:h-auto md:self-stretch bg-slate-900">
+                    <img 
+                        src={EXAMPLE_IMAGE_URL} 
+                        alt="Örnek Figür Çıktısı" 
+                        className="w-full h-full object-cover opacity-90 hover:opacity-100 transition-opacity"
+                    />
+                    <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 shadow-lg">
+                        ÖRNEK SONUÇ
+                    </div>
+                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent md:bg-gradient-to-l"></div>
+                </div>
+            </div>
+        </div>
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 items-start">
